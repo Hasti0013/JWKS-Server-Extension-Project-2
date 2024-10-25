@@ -4,7 +4,7 @@
 # EUID- hhr0013
 # Project2: Extending JWKS Server
 
-# Import necessary libraries
+# Import required libraries
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -16,37 +16,43 @@ import sqlite3
 import json
 import jwt
 
-# Custom request handler class
+# Define a custom request handler
 class RequestHandler(BaseHTTPRequestHandler):
-    JWKS = {"keys": []}  # Storage for JSON Web Keys (JWKs)
+    JWKS = {"keys": []}  # Initialize storage for JSON Web Keys (JWKs)
 
-    # Methods to handle various HTTP request types
-    def do_PUT(self):  # Handles PUT request (Method Not Allowed)
+    # Handle HTTP PUT requests (Not Allowed)
+    def do_PUT(self):
         self.send_response(405)
         self.end_headers()
 
-    def do_DELETE(self):  # Handles DELETE request (Method Not Allowed)
+    # Handle HTTP DELETE requests (Not Allowed)
+    def do_DELETE(self):
         self.send_response(405)
         self.end_headers()
 
-    def do_PATCH(self):  # Handles PATCH request (Method Not Allowed)
+    # Handle HTTP PATCH requests (Not Allowed)
+    def do_PATCH(self):
         self.send_response(405)
         self.end_headers()
 
-    def do_HEAD(self):  # Handles HEAD request (Method Not Allowed)
+    # Handle HTTP HEAD requests (Not Allowed)
+    def do_HEAD(self):
         self.send_response(405)
         self.end_headers()
 
+    # Handle HTTP GET requests
     def do_GET(self):
         if self.path == "/.well-known/jwks.json":
             self.send_response(200)
             self.end_headers()
             curs = db.cursor()
 
+            # Query to retrieve active keys from the database
             select = "SELECT * FROM keys WHERE exp > ?;"
             curs.execute(select, (timegm(datetime.now(tz=timezone.utc).timetuple()),))
             rows = curs.fetchall()
 
+            # Build the JWKs response
             for row in rows:
                 expiry = row[2]
                 priv_key_bytes = row[1]
@@ -61,25 +67,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "use": "sig",
                     "n": base64url_encode(
                         bytes_from_int(pub_key.public_numbers().n)
-                    ).decode(
-                        "UTF-8"
-                    ),  # base64 encoded Modulus
+                    ).decode("UTF-8"),  # Base64 encoded Modulus
                     "e": base64url_encode(
                         bytes_from_int(pub_key.public_numbers().e)
-                    ).decode(
-                        "UTF-8"
-                    ),  # base64 encoded Exponent
+                    ).decode("UTF-8"),  # Base64 encoded Exponent
                 }
                 if not expiry <= timegm(datetime.now(tz=timezone.utc).timetuple()):
                     self.JWKS["keys"].append(JWK)
 
+            # Send the JWKs as a JSON response
             self.wfile.write(json.dumps(self.JWKS, indent=1).encode("UTF-8"))
             return
         else:
-            self.send_response(405)  # Handles other GET requests (Method Not Allowed)
+            self.send_response(405)  # Handle unsupported GET requests
             self.end_headers()
             return
 
+    # Handle HTTP POST requests
     def do_POST(self):
         if (
             self.path == "/auth"
@@ -93,6 +97,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             curs = db.cursor()
 
+            # Determine which keys to select based on expiry
             if expired:
                 select = "SELECT kid, key, exp FROM keys WHERE exp <= ?;"
             else:
@@ -112,21 +117,21 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(bytes(jwt_token, "UTF-8"))
             return
         else:
-            self.send_response(405)  # Handles other POST requests (Method Not Allowed)
+            self.send_response(405)  # Handle unsupported POST requests
             self.end_headers()
             return
 
-# Create HTTP server on localhost:8080
+# Initialize the HTTP server on localhost:8080
 http_server = HTTPServer(("", 8080), RequestHandler)
 
-# Connect to the SQLite database and create the keys table if not exists
+# Connect to the SQLite database and ensure the keys table exists
 db = sqlite3.connect("totally_not_my_privateKeys.db")
 db.execute(
     "CREATE TABLE IF NOT EXISTS keys(kid INTEGER PRIMARY KEY AUTOINCREMENT, key BLOB NOT NULL, exp INTEGER NOT NULL);"
 )
 
-# Generate key pairs and insert them into the database
-print("Generating key pairs... Please wait...")
+# Generate key pairs and store them in the database
+print("Generating key pairs... Please hold on...")
 for i in range(5):
     priv_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     priv_key_bytes = priv_key.private_bytes(
@@ -142,12 +147,13 @@ for i in range(5):
     insert = "INSERT INTO keys (key, exp) VALUES(?, ?);"
     db.execute(insert, (priv_key_bytes, timegm(expiry.timetuple())))
 db.commit()
-print("HTTP Server running on Localhost port 8080...")
+print("HTTP Server is up and running on localhost port 8080...")
 
+# Keep the server running indefinitely
 try:
-    http_server.serve_forever()  # Run the server forever
-except KeyboardInterrupt:  # Stop the server on KeyboardInterrupt
+    http_server.serve_forever()
+except KeyboardInterrupt:  # Gracefully shut down on interrupt
     db.close()
     pass
 
-http_server.server_close()  # Close the server
+http_server.server_close()  # Close the server connection
